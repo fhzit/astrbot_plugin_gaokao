@@ -4,10 +4,11 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 from astrbot.api import AstrBotConfig, logger
+from astrbot.api.event import MessageChain
 from astrbot.api.star import Context, Star, register
 
 
-@register("astrbot_plugin_gaokao_countdown", "HelloFHZ", "每日高考倒计时与 UAPIPro 一言", "1.0.0")
+@register("astrbot_plugin_gaokao_countdown", "HelloFHZ", "每日高考倒计时与 UAPIPro 一言", "1.1.0")
 class GaokaoCountdown(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -28,37 +29,49 @@ class GaokaoCountdown(Star):
 
     async def _scheduler(self):
         while True:
-            tz = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
-            now = datetime.now(tz)
-            target = now.replace(
-                hour=int(self.config.get("send_hour", 7)),
-                minute=int(self.config.get("send_minute", 0)),
-                second=0,
-                microsecond=0,
-            )
-            if target <= now:
-                target += timedelta(days=1)
-            await asyncio.sleep((target - now).total_seconds())
-            today = datetime.now(tz).date().isoformat()
-            if self._sent_date != today:
-                await self._send_daily()
-                self._sent_date = today
+            try:
+                tz = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
+                now = datetime.now(tz)
+                hour = int(self.config.get("send_hour", 7))
+                minute = int(self.config.get("send_minute", 0))
+                if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+                    raise ValueError("发送时间必须为有效的小时和分钟")
+                target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                if target <= now:
+                    target += timedelta(days=1)
+                await asyncio.sleep((target - now).total_seconds())
+                today = datetime.now(tz).date().isoformat()
+                if self._sent_date != today:
+                    await self._send_daily()
+                    self._sent_date = today
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error(f"定时任务配置或执行异常，将在 60 秒后重试：{exc}")
+                await asyncio.sleep(60)
 
     async def _saying(self):
         api_type = self.config.get("api_type", "mode")
         params = {}
         if api_type == "random":
             url = "https://uapis.cn/api/v1/saying"
-        else:
+        elif api_type == "mode":
             url = "https://uapis.cn/api/v1/saying/random"
-            mode = self.config.get("mode", "daily")
+            mode = str(self.config.get("mode", "daily"))
+            if mode not in {"random", "daily", "recommend", "moment"}:
+                raise ValueError("高级一言 mode 只支持 random/daily/recommend/moment")
             params["mode"] = mode
             if mode == "recommend":
-                params["scene"] = str(self.config.get("scene", "morning"))
+                scene = str(self.config.get("scene", "")).strip()
+                if not scene:
+                    raise ValueError("recommend 模式必须填写 scene")
+                params["scene"] = scene
             for key in ("source", "category", "tag"):
                 value = str(self.config.get(key, "")).strip()
                 if value:
                     params[key] = value
+        else:
+            raise ValueError("api_type 只支持 random 或 mode")
         headers = {}
         api_key = str(self.config.get("api_key", "")).strip()
         if api_key:
@@ -84,6 +97,10 @@ class GaokaoCountdown(Star):
         ]
         if not groups:
             logger.warning("高考倒计时：未配置群聊 ID")
+            return
+        prefix = str(self.config.get("umo_prefix", "")).strip()
+        if not prefix:
+            logger.error("必须填写实际 AstrBot 平台实例 ID（umo_prefix），已停止发送")
             return
         tz = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
         today = datetime.now(tz).date()
@@ -119,9 +136,18 @@ class GaokaoCountdown(Star):
             except Exception as exc:
                 logger.error(f"LLM 审核调用失败，按拒绝发布处理：{exc}")
                 return
-        prefix = str(self.config.get("umo_prefix", "default"))
+        try:
+            from astrbot.core.message.message_event import MessageSesion
+            parsed = MessageSesion.from_str(f"{prefix}:GroupMessage:{groups[0]}")
+            platform_id = parsed.platform_name
+        except Exception as exc:
+            logger.error(f"群聊会话 UMO 配置格式错误：{exc}")
+            return
         for group in groups:
             try:
-                await self.context.send_message(f"{prefix}:GroupMessage:{group}", message)
+                umo = f"{platform_id}:GroupMessage:{group}"
+                sent = await self.context.send_message(umo, MessageChain().message(message))
+                if sent is False:
+                    logger.error(f"向群 {group} 发送失败：没有找到匹配的平台实例")
             except Exception as exc:
                 logger.error(f"向群 {group} 推送失败：{exc}")

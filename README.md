@@ -15,7 +15,7 @@
 - API Key 可选；留空匿名请求，有 Key 时通过 Bearer Authorization 传入。
 
 ## 配置
-在插件配置中填写 `group_ids`（多个群号用英文逗号分隔）。`exam_date` 默认为 `2027-06-07`，每天发送时计算与当前日期的天数差。默认 07:00（Asia/Shanghai）。`umo_prefix` 必须填写 AstrBot 实际平台实例 ID；可参考 AstrBot 会话 UMO 的第一段。
+在插件配置中填写 `group_ids`（多个群号用英文逗号分隔）。`exam_date` 默认为 `2027-06-07`，每天发送时计算与当前日期的天数差。默认 07:00（Asia/Shanghai）。`umo_prefix` 必须填写 AstrBot 实际平台实例 ID；可参考 AstrBot 会话 UMO 的第一段。未填写时插件拒绝发送，避免把消息发往猜测的实例。
 
 `api_type` 设为 `random` 使用基础接口，设为 `mode` 使用高级接口。高级接口的 `mode` 为 `random`、`daily`、`recommend`、`moment`；仅 `recommend` 需要 `scene`。可选过滤项填写 API 支持的来源、分类和标签；可用逗号或分号分隔多个过滤值。中文筛选建议使用中文语料来源/分类。
 
