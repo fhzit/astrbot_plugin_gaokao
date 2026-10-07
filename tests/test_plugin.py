@@ -229,9 +229,9 @@ async def cron_registration_smoke():
     assert tz == "Asia/Shanghai" and persistent is True
 
     sends = []
-    plugin._send_daily = lambda: sends.append(1) or asyncio.sleep(0)
-    await plugin._scheduled_fire()
-    await plugin._scheduled_fire()
+    plugin._send_daily = lambda **kw: sends.append(1) or asyncio.sleep(0)
+    await plugin._scheduled_fire(session="test:GroupMessage:1")
+    await plugin._scheduled_fire(session="test:GroupMessage:1")
     assert len(sends) == 1
 
     plugin2 = instance({"send_hour": 7}, ContextStub())

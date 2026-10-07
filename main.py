@@ -41,7 +41,9 @@ class GaokaoCountdown(Star):
         return f"{minute} {hour} * * *"
 
     def _cron_job_name(self) -> str:
-        return f"gaokao_countdown_{id(self)}"
+        # 固定任务名：不能带 id(self) 等每次启动会变化的值，
+        # 否则重启后匹配不到旧任务，产生无法触发的孤儿任务
+        return "gaokao_countdown_daily"
 
     async def _register_cron_job(self):
         """把每日推送注册到 AstrBot 未来任务（CronJobManager，basic 型持久任务）。"""
@@ -69,6 +71,8 @@ class GaokaoCountdown(Star):
             job = await cron_mgr.add_basic_job(
                 name=self._cron_job_name(),
                 cron_expression=cron_expression,
+                # AstrBot 以 handler(**payload) 调用，这里声明 **kwargs
+                # 兼容 payload 中任何键（如 session）被当作 kwarg 传入
                 handler=self._scheduled_fire,
                 description="高考倒计时每日一言定时推送",
                 timezone=str(self.config.get("timezone", "Asia/Shanghai")) or None,
@@ -91,8 +95,12 @@ class GaokaoCountdown(Star):
         except Exception as exc:
             logger.warning(f"清理未来任务失败：{exc}")
 
-    async def _scheduled_fire(self):
-        """未来任务触发入口：只发当日第一条，其余交回内置调度器。"""
+    async def _scheduled_fire(self, **kwargs):
+        """未来任务触发入口：只发当日第一条，其余交回内置调度器。
+
+        AstrBot 以 handler(**payload) 调用，payload 中任何键（如 session）
+        都会作为 kwarg 传入，因此签名必须是 **kwargs。
+        """
         tz = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
         today = datetime.now(tz).date().isoformat()
         if self._sent_date != today:
