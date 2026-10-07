@@ -11,6 +11,7 @@
 - 自定义高考日期、发送时间、时区和目标群号。
 - 两种 UAPIPro 接口：基础一言 `/api/v1/saying`；高级 `/api/v1/saying/random`，支持随机、每日、场景推荐、此刻。
 - 高级接口支持 `source`、`category`、`tag` 过滤；场景模式可设置 `scene`。
+- 可选启用发布前 LLM 审核：需填写 AstrBot 文本模型提供商 ID；仅模型明确返回 `PASS` 才发布。模型拒绝、返回格式异常或调用出错均按拒绝处理（fail-closed）。
 - API Key 可选；留空匿名请求，有 Key 时通过 Bearer Authorization 传入。
 
 ## 配置

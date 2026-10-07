@@ -12,6 +12,8 @@
     {"key": "scene", "type": "string", "default": "morning", "description": "mode=recommend 时必填，如 morning/night/work"},
     {"key": "source", "type": "string", "default": "", "description": "可选来源过滤，逗号或分号分隔"},
     {"key": "category", "type": "string", "default": "", "description": "可选分类过滤"},
-    {"key": "tag", "type": "string", "default": "", "description": "可选标签过滤"}
+    {"key": "tag", "type": "string", "default": "", "description": "可选标签过滤"},
+    {"key": "llm_review_enabled", "type": "bool", "default": false, "description": "是否在发布前调用 LLM 审核；未通过或审核出错时会阻止发布"},
+    {"key": "llm_provider_id", "type": "string", "default": "", "description": "审核使用的 AstrBot 文本模型提供商 ID（需启用审核时填写）"}
   ]
 }

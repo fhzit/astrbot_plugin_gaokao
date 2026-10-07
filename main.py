@@ -97,6 +97,28 @@ class GaokaoCountdown(Star):
         except Exception as exc:
             logger.error(f"获取一言或构造消息失败：{exc}")
             return
+        if bool(self.config.get("llm_review_enabled", False)):
+            try:
+                provider_id = str(self.config.get("llm_provider_id", "")).strip()
+                if not provider_id:
+                    logger.warning("LLM 审核已启用但未配置模型提供商 ID，按拒绝发布处理")
+                    return
+                review = await self.context.llm_generate(
+                    chat_provider_id=provider_id,
+                    system_prompt=(
+                        "你是高考倒计时群消息的内容审核员。只检查下面待发布内容是否适合学生群。"
+                        "若无明显违法、色情、仇恨、欺凌、危险行为鼓励、政治敏感或明显不当内容，返回 PASS；"
+                        "否则返回 REJECT。只输出 PASS 或 REJECT，不要解释。"
+                    ),
+                    prompt=f"审核以下内容：\n{message}",
+                )
+                result = str(getattr(review, "completion_text", "") or "").strip().upper()
+                if result != "PASS":
+                    logger.info(f"LLM 审核未通过或无法识别结果，已阻止发布：{result[:80]}")
+                    return
+            except Exception as exc:
+                logger.error(f"LLM 审核调用失败，按拒绝发布处理：{exc}")
+                return
         prefix = str(self.config.get("umo_prefix", "default"))
         for group in groups:
             try:
