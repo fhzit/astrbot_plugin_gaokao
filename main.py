@@ -57,13 +57,22 @@ class GaokaoCountdown(Star):
             for job in await cron_mgr.list_jobs():
                 if job.name == self._cron_job_name() and job.job_type == "basic":
                     await cron_mgr.delete_job(job.job_id)
+            payload = {}
+            prefix = str(self.config.get("umo_prefix", "")).strip()
+            groups = [
+                g.strip()
+                for g in str(self.config.get("group_ids", "")).replace("，", ",").split(",")
+                if g.strip()
+            ]
+            if prefix and groups:
+                payload["session"] = f"{prefix}:GroupMessage:{groups[0]}"
             job = await cron_mgr.add_basic_job(
                 name=self._cron_job_name(),
                 cron_expression=cron_expression,
                 handler=self._scheduled_fire,
                 description="高考倒计时每日一言定时推送",
                 timezone=str(self.config.get("timezone", "Asia/Shanghai")) or None,
-                payload={},
+                payload=payload,
                 enabled=True,
                 persistent=True,
             )
