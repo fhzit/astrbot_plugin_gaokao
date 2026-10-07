@@ -29,6 +29,7 @@
         "hint": "random 随机一言；daily 每日固定一言；recommend 按场景推荐（需选择场景）；moment 按当前时段自动适配。",
         "type": "string",
         "options": ["random", "daily", "recommend", "moment"],
+        "labels": ["随机一言", "每日一言", "场景推荐", "此刻"],
         "default": "random"
       },
       "scene": {
@@ -40,6 +41,11 @@
           "evening", "night", "deep-night", "work",
           "coding", "meeting", "relax", "emo", "philosophy"
         ],
+        "labels": [
+          "破晓", "清晨", "午间", "午后",
+          "傍晚", "夜晚", "深夜", "工作",
+          "编程", "会议", "放松", "情绪", "哲思"
+        ],
         "default": "morning"
       },
       "source": {
@@ -47,6 +53,7 @@
         "hint": "限定语录的来源语料库，可多选；不选则不限制来源。",
         "type": "list",
         "options": ["caoxingyu", "english-historical-quotes", "quotable", "sentences-bundle"],
+        "labels": ["曹兴煜语录", "英语历史名言", "Quotable 语录", "佳句合集"],
         "default": []
       },
       "category": {
