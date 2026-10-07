@@ -167,25 +167,68 @@ async def main():
         "group_ids": "123,456", "umo_prefix": "platform-A",
         "exam_date": "2027-06-07", "timezone": "Asia/Shanghai",
     }
-    for review, fail, expected_sends in [("PASS", False, 2), ("REJECT", False, 0), ("uncertain", False, 0), ("", True, 0)]:
-        context = ContextStub(review, fail)
-        plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider"}, context)
-        plugin._saying = lambda: asyncio.sleep(0, result="保持努力")
-        await plugin._send_daily()
-        assert len(context.sent) == expected_sends
-        assert context.review_calls == 1
+    # PASS 一次通过；REJECT 重试到用尽；审核异常 fail-closed
+    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider"}, ContextStub("PASS"))
+    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="保持努力")
+    await plugin._send_daily()
+    assert len(plugin.context.sent) == 2 and plugin.context.review_calls == 1
+
+    context = ContextStub("REJECT")
+    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 3}, context)
+    sayings = iter(["句子A", "句子B", "句子C", "句子D"])
+
+    async def next_saying():
+        return next(sayings)
+
+    plugin._saying_with_fallback = next_saying
+    await plugin._send_daily()
+    assert not context.sent and context.review_calls == 3  # 3 次全拒后放弃
+
+    context = ContextStub("uncertain")
+    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 2}, context)
+    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="句子")
+    await plugin._send_daily()
+    assert not context.sent and context.review_calls == 2
+
+    context = ContextStub("", True)  # 审核调用异常
+    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider"}, context)
+    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="句子")
+    await plugin._send_daily()
+    assert not context.sent and context.review_calls == 1
+
+    # 第二次审核通过：第一次 REJECT 后重新获取再审核
+    class FlipContext(ContextStub):
+        def __init__(self):
+            super().__init__("REJECT")
+            self.saying_count = 0
+
+    context = FlipContext()
+
+    async def flip_review(message):
+        context.review_calls += 1
+        return context.review_calls >= 2  # 第 2 次通过
+
+    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 3}, context)
+    plugin._review = flip_review
+    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="逆袭的句子")
+    await plugin._send_daily()
+    assert len(context.sent) == 2 and context.review_calls == 2
+
+    # 未配置 provider：fail-closed
     context = ContextStub()
     plugin = instance({**base, "llm_review_enabled": True}, context)
-    plugin._saying = lambda: asyncio.sleep(0, result="正文")
+    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="正文")
     await plugin._send_daily()
     assert not context.sent and not context.review_calls
+
+    # 审核关闭：直通
     context = ContextStub()
     plugin = instance({**base, "llm_review_enabled": False}, context)
-    plugin._saying = lambda: asyncio.sleep(0, result="正文")
+    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="正文")
     await plugin._send_daily()
     assert len(context.sent) == 2 and context.review_calls == 0
     assert context.sent[0][0] == "platform-A:GroupMessage:123"
-    print("PASS: filters, LLM fail-closed gates, optional bypass, UMO/MessageChain sends")
+    print("PASS: filters, LLM retry-until-pass/fail-closed gates, optional bypass, UMO/MessageChain sends")
 
 
 class CronManagerStub:

@@ -217,6 +217,34 @@ class GaokaoCountdown(Star):
         assert last_error is not None
         raise last_error
 
+    async def _review(self, message: str) -> bool:
+        """LLM 审核：仅模型明确返回 PASS 视为通过（fail-closed）。
+
+        审核标准不只查违规内容，还要求语境契合高考备考与励志主题。
+        """
+        provider_id = str(self.config.get("llm_provider_id", "")).strip()
+        if not provider_id:
+            logger.warning("LLM 审核已启用但未配置模型提供商 ID，按拒绝发布处理")
+            return False
+        review = await self.context.llm_generate(
+            chat_provider_id=provider_id,
+            system_prompt=(
+                "你是高考倒计时群消息的内容审核员。待审核内容是一条发送给高三学生的高考倒计时推送，"
+                "由日期行和一句名言警句组成。你需要从两个维度审核：\n"
+                "1. 内容安全：不得包含违法、色情、仇恨、欺凌、危险行为鼓励、政治敏感或其他明显不当内容；\n"
+                "2. 语境契合：名言警句必须与高考备考场景相符，具有励志、鼓励、坚持、"
+                "奋斗、成长、理想等正面主题，能够激励备考学生；"
+                "消极颓废、与备考无关、无激励意义或主题离题的内容不符合要求。\n"
+                "两个维度都满足才返回 PASS，否则返回 REJECT。只输出 PASS 或 REJECT，不要解释。"
+            ),
+            prompt=f"审核以下内容：\n{message}",
+        )
+        result = str(getattr(review, "completion_text", "") or "").strip().upper()
+        if result != "PASS":
+            logger.info(f"LLM 审核未通过或无法识别结果：{result[:80]}")
+            return False
+        return True
+
     async def _send_daily(self) -> bool:
         """执行一次完整推送；返回是否有任一群发送成功。"""
         groups = [
@@ -233,37 +261,49 @@ class GaokaoCountdown(Star):
             return False
         tz = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
         today = datetime.now(tz).date()
-        try:
-            exam_date = datetime.strptime(
-                str(self.config.get("exam_date", "2027-06-07")), "%Y-%m-%d"
-            ).date()
-            days = (exam_date - today).days
-            saying = await self._saying_with_fallback()
-            message = f"{today:%Y.%m.%d}｜高考倒计时{days}天\n{saying}"
-        except Exception as exc:
-            logger.error(f"获取一言或构造消息失败：{exc}")
-            return False
+        exam_date = datetime.strptime(
+            str(self.config.get("exam_date", "2027-06-07")), "%Y-%m-%d"
+        ).date()
+        days = (exam_date - today).days
         if bool(self.config.get("llm_review_enabled", False)):
             try:
-                provider_id = str(self.config.get("llm_provider_id", "")).strip()
-                if not provider_id:
-                    logger.warning("LLM 审核已启用但未配置模型提供商 ID，按拒绝发布处理")
+                max_attempts = int(self.config.get("llm_review_max_attempts", 3))
+            except (TypeError, ValueError):
+                max_attempts = 3
+            max_attempts = max(1, min(max_attempts, 10))
+            provider_id = str(self.config.get("llm_provider_id", "")).strip()
+            if not provider_id:
+                logger.warning("LLM 审核已启用但未配置模型提供商 ID，按拒绝发布处理")
+                return False
+            message = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    saying = await self._saying_with_fallback()
+                    candidate = f"{today:%Y.%m.%d}｜高考倒计时{days}天\n{saying}"
+                except Exception as exc:
+                    logger.error(f"获取一言或构造消息失败：{exc}")
                     return False
-                review = await self.context.llm_generate(
-                    chat_provider_id=provider_id,
-                    system_prompt=(
-                        "你是高考倒计时群消息的内容审核员。只检查下面待发布内容是否适合学生群。"
-                        "若无明显违法、色情、仇恨、欺凌、危险行为鼓励、政治敏感或明显不当内容，返回 PASS；"
-                        "否则返回 REJECT。只输出 PASS 或 REJECT，不要解释。"
-                    ),
-                    prompt=f"审核以下内容：\n{message}",
-                )
-                result = str(getattr(review, "completion_text", "") or "").strip().upper()
-                if result != "PASS":
-                    logger.info(f"LLM 审核未通过或无法识别结果，已阻止发布：{result[:80]}")
+                try:
+                    passed = await self._review(candidate)
+                except Exception as exc:
+                    logger.error(f"LLM 审核调用失败，按拒绝发布处理：{exc}")
                     return False
+                if passed:
+                    message = candidate
+                    break
+                if attempt < max_attempts:
+                    logger.info(
+                        f"LLM 审核未通过（第 {attempt}/{max_attempts} 次），重新获取一言再审"
+                    )
+            if message is None:
+                logger.error(f"连续 {max_attempts} 次审核未通过，本次放弃发布")
+                return False
+        else:
+            try:
+                saying = await self._saying_with_fallback()
+                message = f"{today:%Y.%m.%d}｜高考倒计时{days}天\n{saying}"
             except Exception as exc:
-                logger.error(f"LLM 审核调用失败，按拒绝发布处理：{exc}")
+                logger.error(f"获取一言或构造消息失败：{exc}")
                 return False
         try:
             from astrbot.core.platform.message_session import MessageSession

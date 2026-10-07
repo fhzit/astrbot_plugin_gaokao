@@ -84,5 +84,11 @@
     }
   },
   "llm_review_enabled": {"description": "启用发布前 LLM 审核；审核拒绝或出错均阻止发送", "type": "bool", "default": false},
+  "llm_review_max_attempts": {
+    "description": "审核重试次数上限",
+    "hint": "审核未通过时重新获取一言再审，最多尝试的次数（1-10，默认 3）；用尽仍不通过则本次放弃发布。",
+    "type": "int",
+    "default": 3
+  },
   "llm_provider_id": {"description": "审核使用的 AstrBot 文本模型提供商 ID", "type": "string", "default": "", "_special": "select_provider"}
 }
