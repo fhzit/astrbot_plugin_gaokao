@@ -190,11 +190,11 @@ async def main():
     await plugin._send_daily()
     assert not context.sent and context.review_calls == 2
 
-    context = ContextStub("", True)  # 审核调用异常
-    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider"}, context)
+    context = ContextStub("", True)  # 审核调用异常：重试等待后仍失败
+    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 3}, context)
     plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="句子")
     await plugin._send_daily()
-    assert not context.sent and context.review_calls == 1
+    assert not context.sent and context.review_calls == 3  # 3 次都异常后放弃
 
     # 第二次审核通过：第一次 REJECT 后重新获取再审核
     class FlipContext(ContextStub):

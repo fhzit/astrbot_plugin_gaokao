@@ -295,15 +295,27 @@ class GaokaoCountdown(Star):
                 try:
                     passed = await self._review(candidate)
                 except Exception as exc:
-                    logger.error(f"LLM 审核调用失败，按拒绝发布处理：{exc}")
+                    # 常见于模型 API 限流（429）：等待后重试而不是直接放弃
+                    if attempt < max_attempts:
+                        wait = attempt
+                        logger.warning(
+                            f"LLM 审核调用失败（{exc}），等待 {wait} 秒后重试"
+                            f"（{attempt}/{max_attempts}）"
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+                    logger.error(f"LLM 审核调用失败，已达重试上限，按拒绝发布处理：{exc}")
                     return False
                 if passed:
                     message = candidate
                     break
                 if attempt < max_attempts:
+                    wait = attempt
                     logger.info(
-                        f"LLM 审核未通过（第 {attempt}/{max_attempts} 次），重新获取一言再审"
+                        f"LLM 审核未通过（第 {attempt}/{max_attempts} 次），"
+                        f"等待 {wait} 秒后重新获取一言再审"
                     )
+                    await asyncio.sleep(wait)
             if message is None:
                 logger.error(f"连续 {max_attempts} 次审核未通过，本次放弃发布")
                 return False
