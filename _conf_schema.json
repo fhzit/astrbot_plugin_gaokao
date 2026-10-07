@@ -1,0 +1,17 @@
+{
+  "配置项": [
+    {"key": "group_ids", "type": "string", "default": "", "description": "目标群号，多个用英文逗号分隔"},
+    {"key": "exam_date", "type": "string", "default": "2027-06-07", "description": "高考日期 YYYY-MM-DD"},
+    {"key": "send_hour", "type": "int", "default": 7, "description": "每日发送小时（0-23）"},
+    {"key": "send_minute", "type": "int", "default": 0, "description": "每日发送分钟（0-59）"},
+    {"key": "timezone", "type": "string", "default": "Asia/Shanghai", "description": "时区"},
+    {"key": "umo_prefix", "type": "string", "default": "default", "description": "AstrBot 平台实例 ID（UMO 前缀）"},
+    {"key": "api_type", "type": "string", "default": "mode", "description": "API：random=基础一言；mode=随机/每日/场景/此刻"},
+    {"key": "api_key", "type": "string", "default": "", "description": "可选 UAPIPro Key，留空匿名调用"},
+    {"key": "mode", "type": "string", "default": "daily", "description": "高级 API mode: random/daily/recommend/moment"},
+    {"key": "scene", "type": "string", "default": "morning", "description": "mode=recommend 时必填，如 morning/night/work"},
+    {"key": "source", "type": "string", "default": "", "description": "可选来源过滤，逗号或分号分隔"},
+    {"key": "category", "type": "string", "default": "", "description": "可选分类过滤"},
+    {"key": "tag", "type": "string", "default": "", "description": "可选标签过滤"}
+  ]
+}

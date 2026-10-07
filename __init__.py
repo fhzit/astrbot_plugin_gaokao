@@ -1,0 +1,6 @@
+name = "astrbot_plugin_gaokao_countdown"
+display_name = "高考倒计时每日一言"
+description = "每日向指定群聊推送高考倒计时与 UAPIPro 名言。"
+author = "HelloFHZ"
+version = "1.0.0"
+repo = "https://github.com/fhzit/astrbot-gaokao-countdown"
