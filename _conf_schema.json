@@ -52,8 +52,8 @@
         "description": "语料来源过滤",
         "hint": "限定语录的来源语料库，可多选；不选则不限制来源。",
         "type": "list",
-        "options": ["caoxingyu", "english-historical-quotes", "quotable", "sentences-bundle"],
-        "labels": ["曹兴煜语录", "英语历史名言", "Quotable 语录", "佳句合集"],
+        "options": ["caoxingyu sentence", "english historical quotes", "quotable", "sentences bundle"],
+        "labels": ["曹星宇句子集（中文）", "英文历史名言", "Quotable 名言库", "综合句子语料库（中文为主）"],
         "default": []
       },
       "category": {
