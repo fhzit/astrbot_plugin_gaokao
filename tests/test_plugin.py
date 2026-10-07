@@ -229,10 +229,23 @@ async def cron_registration_smoke():
     assert tz == "Asia/Shanghai" and persistent is True
 
     sends = []
-    plugin._send_daily = lambda **kw: sends.append(1) or asyncio.sleep(0)
+    async def fake_send(**kw):
+        sends.append(1)
+        return True
+
+    plugin._send_daily = fake_send
     await plugin._scheduled_fire(session="test:GroupMessage:1")
     await plugin._scheduled_fire(session="test:GroupMessage:1")
     assert len(sends) == 1
+    # 失败不标记：模拟发送失败，再次触发应重试
+    plugin._sent_date = None
+
+    async def failing_send(**kw):
+        return False
+
+    plugin._send_daily = failing_send
+    await plugin._scheduled_fire(session="test:GroupMessage:1")
+    await plugin._scheduled_fire(session="test:GroupMessage:1")  # 失败不记当日标记，可重试
 
     plugin2 = instance({"send_hour": 7}, ContextStub())
     plugin2.context.cron_manager = None

@@ -100,12 +100,15 @@ class GaokaoCountdown(Star):
 
         AstrBot 以 handler(**payload) 调用，payload 中任何键（如 session）
         都会作为 kwarg 传入，因此签名必须是 **kwargs。
+        发送失败不标记当天已发，下次触发（或重试）仍会尝试。
         """
         tz = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
         today = datetime.now(tz).date().isoformat()
-        if self._sent_date != today:
+        if self._sent_date == today:
+            logger.info("今日高考倒计时已发送过，跳过本次触发")
+            return
+        if await self._send_daily():
             self._sent_date = today
-            await self._send_daily()
 
     async def _scheduler(self):
         while True:
@@ -183,7 +186,39 @@ class GaokaoCountdown(Star):
                     raise ValueError(f"语料库异常: {api_msg or '无法读取语录数据，请稍后再试'}")
                 raise ValueError(f"接口响应异常 (HTTP {resp.status})" + (f": {api_msg}" if api_msg else ""))
 
-    async def _send_daily(self):
+    async def _saying_with_fallback(self):
+        """带降级重试的一言获取。
+
+        UAPIPro 的多标签是 AND 语义，标签勾太多容易无匹配（HTTP 404）。
+        依次尝试：原始筛选 → 去掉标签 → 去掉标签和分类 → 去掉全部筛选，
+        保证每天一定能取到语录。
+        """
+        advanced = dict(self.config.get("hitokoto_advanced", {}) or {})
+        attempts = []
+        if advanced.get("enabled", False):
+            attempts.append(advanced)
+            if advanced.get("tag"):
+                reduced = dict(advanced, tag=[])
+                attempts.append(reduced)
+                reduced2 = dict(reduced, category=[])
+                attempts.append(reduced2)
+            attempts.append(dict(advanced, enabled=False))
+        else:
+            attempts.append(advanced)
+        last_error: Exception | None = None
+        for i, attempt in enumerate(attempts):
+            try:
+                self.config["hitokoto_advanced"] = attempt
+                return await self._saying()
+            except Exception as exc:
+                last_error = exc
+                if i < len(attempts) - 1:
+                    logger.warning(f"一言获取失败（{exc}），尝试降级筛选（第 {i + 2} 档）")
+        assert last_error is not None
+        raise last_error
+
+    async def _send_daily(self) -> bool:
+        """执行一次完整推送；返回是否有任一群发送成功。"""
         groups = [
             value.strip()
             for value in str(self.config.get("group_ids", "")).replace("，", ",").split(",")
@@ -191,11 +226,11 @@ class GaokaoCountdown(Star):
         ]
         if not groups:
             logger.warning("高考倒计时：未配置群聊 ID")
-            return
+            return False
         prefix = str(self.config.get("umo_prefix", "")).strip()
         if not prefix:
             logger.error("必须填写实际 AstrBot 平台实例 ID（umo_prefix），已停止发送")
-            return
+            return False
         tz = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
         today = datetime.now(tz).date()
         try:
@@ -203,17 +238,17 @@ class GaokaoCountdown(Star):
                 str(self.config.get("exam_date", "2027-06-07")), "%Y-%m-%d"
             ).date()
             days = (exam_date - today).days
-            saying = await self._saying()
+            saying = await self._saying_with_fallback()
             message = f"{today:%Y.%m.%d}｜高考倒计时{days}天\n{saying}"
         except Exception as exc:
             logger.error(f"获取一言或构造消息失败：{exc}")
-            return
+            return False
         if bool(self.config.get("llm_review_enabled", False)):
             try:
                 provider_id = str(self.config.get("llm_provider_id", "")).strip()
                 if not provider_id:
                     logger.warning("LLM 审核已启用但未配置模型提供商 ID，按拒绝发布处理")
-                    return
+                    return False
                 review = await self.context.llm_generate(
                     chat_provider_id=provider_id,
                     system_prompt=(
@@ -226,22 +261,26 @@ class GaokaoCountdown(Star):
                 result = str(getattr(review, "completion_text", "") or "").strip().upper()
                 if result != "PASS":
                     logger.info(f"LLM 审核未通过或无法识别结果，已阻止发布：{result[:80]}")
-                    return
+                    return False
             except Exception as exc:
                 logger.error(f"LLM 审核调用失败，按拒绝发布处理：{exc}")
-                return
+                return False
         try:
             from astrbot.core.platform.message_session import MessageSession
             parsed = MessageSession.from_str(f"{prefix}:GroupMessage:{groups[0]}")
             platform_id = parsed.platform_name
         except Exception as exc:
             logger.error(f"群聊会话 UMO 配置格式错误：{exc}")
-            return
+            return False
+        any_sent = False
         for group in groups:
             try:
                 umo = f"{platform_id}:GroupMessage:{group}"
                 sent = await self.context.send_message(umo, MessageChain().message(message))
                 if sent is False:
                     logger.error(f"向群 {group} 发送失败：没有找到匹配的平台实例")
+                else:
+                    any_sent = True
             except Exception as exc:
                 logger.error(f"向群 {group} 推送失败：{exc}")
+        return any_sent
