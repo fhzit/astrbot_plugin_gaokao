@@ -98,7 +98,16 @@ def instance(config, context):
 
 
 async def saying_smoke():
-    plugin = instance({"api_type": "mode", "mode": "recommend", "scene": "morning", "source": "中文来源", "category": "文学", "tag": "励志"}, ContextStub())
+    plugin = instance(
+        {
+            "uapi_token": "test-token",
+            "hitokoto_advanced": {
+                "enabled": True, "mode": "recommend", "scene": "morning",
+                "source": "中文来源", "category": "文学", "tag": "励志",
+            },
+        },
+        ContextStub(),
+    )
 
     class Response:
         async def __aenter__(self):
@@ -110,7 +119,9 @@ async def saying_smoke():
         def raise_for_status(self):
             pass
 
-        async def json(self):
+        status = 200
+
+        async def json(self, content_type=None):
             return {"mode": "recommend", "item": {"content": "逐梦前行"}}
 
     class SessionMock:
@@ -139,10 +150,13 @@ async def saying_smoke():
         assert await plugin._saying() == "逐梦前行"
         url, kwargs = holder["session"].params
         assert url.endswith("/saying/random")
-        assert kwargs["params"] == {
-            "mode": "recommend", "scene": "morning", "source": "中文来源",
-            "category": "文学", "tag": "励志",
-        }
+        params = kwargs["params"]
+        assert params["mode"] == "recommend" and params["scene"] == "morning"
+        assert params["source"] == "中文来源" and params["category"] == "文学" and params["tag"] == "励志"
+        assert params["token"] == "test-token"
+        headers = kwargs["headers"]
+        assert headers["Token"] == "test-token" and headers["Authorization"] == "Bearer test-token"
+        assert headers["User-Agent"] == "AstrBot_UApiPro"
     finally:
         plugin_main.aiohttp.ClientSession = old_session
 
@@ -151,7 +165,7 @@ async def main():
     await saying_smoke()
     base = {
         "group_ids": "123,456", "umo_prefix": "platform-A",
-        "exam_date": "2027-06-07", "timezone": "Asia/Shanghai", "api_type": "random",
+        "exam_date": "2027-06-07", "timezone": "Asia/Shanghai",
     }
     for review, fail, expected_sends in [("PASS", False, 2), ("REJECT", False, 0), ("uncertain", False, 0), ("", True, 0)]:
         context = ContextStub(review, fail)

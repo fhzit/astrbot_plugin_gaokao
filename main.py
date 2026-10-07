@@ -51,43 +51,57 @@ class GaokaoCountdown(Star):
                 await asyncio.sleep(60)
 
     async def _saying(self):
-        api_type = self.config.get("api_type", "mode")
+        advanced = dict(self.config.get("hitokoto_advanced", {}) or {})
+        token = str(self.config.get("uapi_token", "")).strip()
+        headers = {"User-Agent": "AstrBot_UApiPro"}
         params = {}
-        if api_type == "random":
+        if token:
+            headers["Token"] = token
+            headers["Authorization"] = f"Bearer {token}"
+            params["token"] = token
+        if not advanced.get("enabled", False):
             url = "https://uapis.cn/api/v1/saying"
-        elif api_type == "mode":
+        else:
             url = "https://uapis.cn/api/v1/saying/random"
-            mode = str(self.config.get("mode", "daily"))
+            mode = str(advanced.get("mode", "random")).strip()
             if mode not in {"random", "daily", "recommend", "moment"}:
                 raise ValueError("高级一言 mode 只支持 random/daily/recommend/moment")
-            params["mode"] = mode
+            if mode != "random":
+                params["mode"] = mode
             if mode == "recommend":
-                scene = str(self.config.get("scene", "")).strip()
+                scene = str(advanced.get("scene", "")).strip()
                 if not scene:
                     raise ValueError("recommend 模式必须填写 scene")
                 params["scene"] = scene
             for key in ("source", "category", "tag"):
-                value = str(self.config.get(key, "")).strip()
+                value = advanced.get(key) or []
+                if isinstance(value, str):
+                    value = [v.strip() for v in value.replace("，", ",").split(",") if v.strip()]
                 if value:
-                    params[key] = value
-        else:
-            raise ValueError("api_type 只支持 random 或 mode")
-        headers = {}
-        api_key = str(self.config.get("api_key", "")).strip()
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+                    params[key] = ",".join(value)
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 url, params=params, headers=headers,
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-        item = data.get("item", data)
-        text = item.get("text") or item.get("content")
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError("UAPIPro 响应中没有语录正文")
-        return text.strip()
+                try:
+                    data = await resp.json(content_type=None)
+                except Exception:
+                    data = {}
+                if resp.status == 200:
+                    item = data.get("item") if isinstance(data, dict) and isinstance(data.get("item"), dict) else data
+                    text = (item.get("text") or item.get("content") or "").strip() if isinstance(item, dict) else ""
+                    if text:
+                        return text
+                    raise ValueError("UAPIPro 响应中没有语录正文")
+                api_msg = data.get("message") if isinstance(data, dict) else None
+                if resp.status == 400:
+                    raise ValueError(f"高级一言参数错误: {api_msg or '请检查 mode/scene 等配置是否合法'}")
+                if resp.status == 404:
+                    raise ValueError("未找到满足当前筛选条件的语录，请调整筛选配置")
+                if resp.status == 500:
+                    raise ValueError(f"语料库异常: {api_msg or '无法读取语录数据，请稍后再试'}")
+                raise ValueError(f"接口响应异常 (HTTP {resp.status})" + (f": {api_msg}" if api_msg else ""))
 
     async def _send_daily(self):
         groups = [
