@@ -18,6 +18,7 @@ class GaokaoCountdown(Star):
 
     async def initialize(self):
         self.task = asyncio.create_task(self._scheduler())
+        await self._register_cron_job()
 
     async def terminate(self):
         if self.task:
@@ -26,6 +27,68 @@ class GaokaoCountdown(Star):
                 await self.task
             except asyncio.CancelledError:
                 pass
+        await self._unregister_cron_job()
+
+    def _cron_expression(self) -> str | None:
+        """把 send_hour/send_minute 换算成五段 cron 表达式，配置非法时返回 None。"""
+        try:
+            hour = int(self.config.get("send_hour", 7))
+            minute = int(self.config.get("send_minute", 0))
+        except (TypeError, ValueError):
+            return None
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            return None
+        return f"{minute} {hour} * * *"
+
+    def _cron_job_name(self) -> str:
+        return f"gaokao_countdown_{id(self)}"
+
+    async def _register_cron_job(self):
+        """把每日推送注册到 AstrBot 未来任务（CronJobManager，basic 型持久任务）。"""
+        cron_expression = self._cron_expression()
+        if cron_expression is None:
+            logger.warning("发送时间配置非法，未注册未来任务；内置调度器仍会重试")
+            return
+        cron_mgr = getattr(self.context, "cron_manager", None)
+        if cron_mgr is None:
+            logger.warning("当前 AstrBot 版本没有 cron_manager，仅使用内置调度器")
+            return
+        try:
+            for job in await cron_mgr.list_jobs():
+                if job.name == self._cron_job_name() and job.job_type == "basic":
+                    await cron_mgr.delete_job(job.job_id)
+            job = await cron_mgr.add_basic_job(
+                name=self._cron_job_name(),
+                cron_expression=cron_expression,
+                handler=self._scheduled_fire,
+                description="高考倒计时每日一言定时推送",
+                timezone=str(self.config.get("timezone", "Asia/Shanghai")) or None,
+                payload={},
+                enabled=True,
+                persistent=True,
+            )
+            logger.info(f"已注册未来任务 {job.job_id}（cron: {cron_expression}）")
+        except Exception as exc:
+            logger.error(f"注册未来任务失败，仅使用内置调度器：{exc}")
+
+    async def _unregister_cron_job(self):
+        cron_mgr = getattr(self.context, "cron_manager", None)
+        if cron_mgr is None:
+            return
+        try:
+            for job in await cron_mgr.list_jobs():
+                if job.name == self._cron_job_name() and job.job_type == "basic":
+                    await cron_mgr.delete_job(job.job_id)
+        except Exception as exc:
+            logger.warning(f"清理未来任务失败：{exc}")
+
+    async def _scheduled_fire(self):
+        """未来任务触发入口：只发当日第一条，其余交回内置调度器。"""
+        tz = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
+        today = datetime.now(tz).date().isoformat()
+        if self._sent_date != today:
+            self._sent_date = today
+            await self._send_daily()
 
     async def _scheduler(self):
         while True:

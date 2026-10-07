@@ -188,4 +188,65 @@ async def main():
     print("PASS: filters, LLM fail-closed gates, optional bypass, UMO/MessageChain sends")
 
 
-asyncio.run(main())
+class CronManagerStub:
+    def __init__(self):
+        self.jobs = []
+        self.added = []
+        self.deleted = []
+
+    async def list_jobs(self):
+        return list(self.jobs)
+
+    async def add_basic_job(self, name, cron_expression, handler, **kwargs):
+        job = types.SimpleNamespace(
+            job_id=f"job-{len(self.added) + 1}", name=name,
+            job_type="basic", cron_expression=cron_expression,
+        )
+        self.jobs.append(job)
+        self.added.append((name, cron_expression, kwargs.get("timezone"), kwargs.get("persistent")))
+        return job
+
+    async def delete_job(self, job_id):
+        self.jobs = [j for j in self.jobs if j.job_id != job_id]
+        self.deleted.append(job_id)
+
+
+async def cron_registration_smoke():
+    plugin = instance({"send_hour": 7, "send_minute": 30}, ContextStub())
+    assert plugin._cron_expression() == "30 7 * * *"
+    plugin_bad = instance({"send_hour": 25, "send_minute": 0}, ContextStub())
+    assert plugin_bad._cron_expression() is None
+
+    cron = CronManagerStub()
+    plugin._cron_job_name = lambda: "gaokao_countdown_test"
+    plugin.context.cron_manager = cron
+    plugin.config.update({"send_hour": 7, "send_minute": 30, "timezone": "Asia/Shanghai"})
+    cron.jobs.append(types.SimpleNamespace(job_id="old", name="gaokao_countdown_test", job_type="basic"))
+    await plugin._register_cron_job()
+    assert cron.deleted == ["old"]
+    name, expr, tz, persistent = cron.added[0]
+    assert name == "gaokao_countdown_test" and expr == "30 7 * * *"
+    assert tz == "Asia/Shanghai" and persistent is True
+
+    sends = []
+    plugin._send_daily = lambda: sends.append(1) or asyncio.sleep(0)
+    await plugin._scheduled_fire()
+    await plugin._scheduled_fire()
+    assert len(sends) == 1
+
+    plugin2 = instance({"send_hour": 7}, ContextStub())
+    plugin2.context.cron_manager = None
+    await plugin2._register_cron_job()  # 优雅降级，不抛异常
+
+    await plugin._unregister_cron_job()
+    assert cron.jobs == []
+    print("PASS: cron job register / fire dedupe / degrade / unregister")
+
+
+async def run_all():
+    await saying_smoke()
+    await main()
+    await cron_registration_smoke()
+
+
+asyncio.run(run_all())
