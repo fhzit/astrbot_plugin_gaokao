@@ -8,7 +8,7 @@ from astrbot.api.event import MessageChain
 from astrbot.api.star import Context, Star, register
 
 
-@register("astrbot_plugin_gaokao_countdown", "HelloFHZ", "每日高考倒计时与 UAPIPro 一言", "1.1.0")
+@register("astrbot_plugin_gaokao", "HelloFHZ", "每日高考倒计时与 UAPIPro 一言", "1.1.0")
 class GaokaoCountdown(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -137,8 +137,8 @@ class GaokaoCountdown(Star):
                 logger.error(f"LLM 审核调用失败，按拒绝发布处理：{exc}")
                 return
         try:
-            from astrbot.core.message.message_event import MessageSesion
-            parsed = MessageSesion.from_str(f"{prefix}:GroupMessage:{groups[0]}")
+            from astrbot.core.platform.message_session import MessageSession
+            parsed = MessageSession.from_str(f"{prefix}:GroupMessage:{groups[0]}")
             platform_id = parsed.platform_name
         except Exception as exc:
             logger.error(f"群聊会话 UMO 配置格式错误：{exc}")

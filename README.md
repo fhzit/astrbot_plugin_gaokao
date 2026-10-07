@@ -7,6 +7,8 @@
 名言警句内容
 ```
 
+metadata.yaml 的 `name` 必须以 `astrbot_plugin_` 开头；此仓库已按官方约定使用 `astrbot_plugin_gaokao`。AstrBot 插件市场元数据以 `metadata.yaml` 为准，配置文件 `_conf_schema.json` 使用根级字段定义配置项。`api_key` 设置为敏感项，管理界面会遮罩显示。
+
 ## 功能
 - 自定义高考日期、发送时间、时区和目标群号。
 - 两种 UAPIPro 接口：基础一言 `/api/v1/saying`；高级 `/api/v1/saying/random`，支持随机、每日、场景推荐、此刻。
@@ -22,6 +24,6 @@
 接口文档：[基础一言](https://uapis.cn/docs/api-reference/get-saying) · [随机/每日/场景/此刻](https://uapis.cn/docs/api-reference/get-saying-random)。
 
 ## 注意
-- 插件按 AstrBot `context.send_message` 的会话 UMO 主动发送；请确保目标群确实可由对应平台实例发送。
+- `Context.send_message()` 使用 UMO 和 `MessageChain` 主动推送；请确保目标群确实可由对应平台实例发送。
 - 当前实现每次插件进程只对每个日期发送一次；重启后不会持久化去重状态。发送失败会记日志，不自动重试。
 - 依赖 `aiohttp`（AstrBot 环境通常已包含）。

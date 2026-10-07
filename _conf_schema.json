@@ -1,19 +1,17 @@
 {
-  "配置项": [
-    {"key": "group_ids", "type": "string", "default": "", "description": "目标群号，多个用英文逗号分隔"},
-    {"key": "exam_date", "type": "string", "default": "2027-06-07", "description": "高考日期 YYYY-MM-DD"},
-    {"key": "send_hour", "type": "int", "default": 7, "description": "每日发送小时（0-23）"},
-    {"key": "send_minute", "type": "int", "default": 0, "description": "每日发送分钟（0-59）"},
-    {"key": "timezone", "type": "string", "default": "Asia/Shanghai", "description": "时区"},
-    {"key": "umo_prefix", "type": "string", "default": "", "description": "AstrBot 平台实例 ID（UMO 前缀），必须填写真实值"},
-    {"key": "api_type", "type": "string", "default": "mode", "description": "API：random=基础一言；mode=随机/每日/场景/此刻"},
-    {"key": "api_key", "type": "string", "default": "", "description": "可选 UAPIPro Key，留空匿名调用"},
-    {"key": "mode", "type": "string", "default": "daily", "description": "高级 API mode: random/daily/recommend/moment"},
-    {"key": "scene", "type": "string", "default": "morning", "description": "mode=recommend 时必填，如 morning/night/work"},
-    {"key": "source", "type": "string", "default": "", "description": "可选来源过滤，逗号或分号分隔"},
-    {"key": "category", "type": "string", "default": "", "description": "可选分类过滤"},
-    {"key": "tag", "type": "string", "default": "", "description": "可选标签过滤"},
-    {"key": "llm_review_enabled", "type": "bool", "default": false, "description": "是否在发布前调用 LLM 审核；未通过或审核出错时会阻止发布"},
-    {"key": "llm_provider_id", "type": "string", "default": "", "description": "审核使用的 AstrBot 文本模型提供商 ID（需启用审核时填写）"}
-  ]
+  "group_ids": {"description": "目标群号，多个群号用英文逗号分隔", "type": "string", "default": ""},
+  "exam_date": {"description": "高考日期，格式 YYYY-MM-DD", "type": "string", "default": "2027-06-07"},
+  "send_hour": {"description": "每日发送小时（0-23）", "type": "int", "default": 7},
+  "send_minute": {"description": "每日发送分钟（0-59）", "type": "int", "default": 0},
+  "timezone": {"description": "时区", "type": "string", "default": "Asia/Shanghai"},
+  "umo_prefix": {"description": "AstrBot 平台实例 ID（UMO 第一段），必须填写实际值", "type": "string", "default": ""},
+  "api_type": {"description": "一言 API 类型", "type": "string", "default": "mode", "options": ["random", "mode"]},
+  "api_key": {"description": "可选 UAPIPro API Key，留空匿名请求", "type": "string", "default": "", "secret": true},
+  "mode": {"description": "高级 API 模式", "type": "string", "default": "daily", "options": ["random", "daily", "recommend", "moment"]},
+  "scene": {"description": "recommend 模式必填，例如 morning、night、work", "type": "string", "default": "morning"},
+  "source": {"description": "语料来源过滤，可用逗号或分号分隔多值", "type": "string", "default": ""},
+  "category": {"description": "语录分类过滤，可用逗号或分号分隔多值", "type": "string", "default": ""},
+  "tag": {"description": "标签过滤，可用逗号或分号分隔多值", "type": "string", "default": ""},
+  "llm_review_enabled": {"description": "启用发布前 LLM 审核；审核拒绝或出错均阻止发送", "type": "bool", "default": false},
+  "llm_provider_id": {"description": "审核使用的 AstrBot 文本模型提供商 ID", "type": "string", "default": "", "_special": "select_provider"}
 }

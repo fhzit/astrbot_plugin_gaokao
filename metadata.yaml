@@ -1,0 +1,19 @@
+name: astrbot_plugin_gaokao
+display_name: 高考倒计时每日一言
+short_desc: 每日推送高考倒计时与 UAPIPro 一言，支持可选 LLM 审核。
+desc: |-
+  每日定时向指定群聊发送高考倒计时和 UAPIPro 名言警句。
+  支持基础一言与随机/每日/场景/此刻接口、来源/分类/标签过滤、可选 API Key 和可选发布前 LLM 审核。
+version: 1.1.0
+author: HelloFHZ
+repo: https://github.com/fhzit/astrbot_plugin_gaokao
+astrbot_version: ">=4.5.7"
+support_platforms:
+  - aiocqhttp
+  - telegram
+  - discord
+  - lark
+  - dingtalk
+  - wecom
+  - kook
+  - satori
