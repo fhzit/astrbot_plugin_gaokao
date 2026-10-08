@@ -273,9 +273,9 @@ class GaokaoCountdown(Star):
         exam_date = datetime.strptime(
             str(self.config.get("exam_date", "2027-06-07")), "%Y-%m-%d"
         ).date()
-        # 倒计时按「含今天、含高考日」计算：10月8日到次年6月7日为 243 天
-        # （10/8 算第 1 天，6/7 算最后 1 天），即天数差 + 1
-        days = (exam_date - today).days + 1
+        # 倒计时口径：今天与高考日当天都不计入，即「完整剩余天数」
+        # 2026-10-08 → 2027-06-07 显示 241，次日 240
+        days = (exam_date - today).days - 1
         if bool(self.config.get("llm_review_enabled", False)):
             try:
                 max_attempts = int(self.config.get("llm_review_max_attempts", 3))
