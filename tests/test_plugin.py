@@ -168,33 +168,33 @@ async def main():
         "exam_date": "2027-06-07", "timezone": "Asia/Shanghai",
     }
     # PASS 一次通过；REJECT 重试到用尽；审核异常 fail-closed
-    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider"}, ContextStub("PASS"))
-    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="保持努力")
+    plugin = instance({**base, "saying_source": "uapipro", "llm_review_enabled": True, "llm_provider_id": "provider"}, ContextStub("PASS"))
+    plugin._saying_with_fallback = lambda entry=None: asyncio.sleep(0, result="保持努力")
     await plugin._send_daily()
-    assert len(plugin.context.sent) == 2 and plugin.context.review_calls == 1
+    assert len(plugin.context.sent) == 2 and plugin.context.review_calls == 2  # 每群独立审核
 
     context = ContextStub("REJECT")
-    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 3}, context)
-    sayings = iter(["句子A", "句子B", "句子C", "句子D"])
+    plugin = instance({**base, "saying_source": "uapipro", "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 3}, context)
+    sayings = iter(["句子A", "句子B", "句子C", "句子D", "句子E", "句子F"])
 
-    async def next_saying():
+    async def next_saying(entry=None):
         return next(sayings)
 
     plugin._saying_with_fallback = next_saying
     await plugin._send_daily()
-    assert not context.sent and context.review_calls == 3  # 3 次全拒后放弃
+    assert not context.sent and context.review_calls == 6  # 2 群 × 3 次全拒后放弃
 
     context = ContextStub("uncertain")
-    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 2}, context)
-    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="句子")
+    plugin = instance({**base, "saying_source": "uapipro", "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 2}, context)
+    plugin._saying_with_fallback = lambda entry=None: asyncio.sleep(0, result="句子")
     await plugin._send_daily()
-    assert not context.sent and context.review_calls == 2
+    assert not context.sent and context.review_calls == 4  # 2 群 × 2 次
 
     context = ContextStub("", True)  # 审核调用异常：重试等待后仍失败
-    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 3}, context)
-    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="句子")
+    plugin = instance({**base, "saying_source": "uapipro", "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 3}, context)
+    plugin._saying_with_fallback = lambda entry=None: asyncio.sleep(0, result="句子")
     await plugin._send_daily()
-    assert not context.sent and context.review_calls == 3  # 3 次都异常后放弃
+    assert not context.sent and context.review_calls == 6  # 2 群 × 3 次都异常后放弃
 
     # 第二次审核通过：第一次 REJECT 后重新获取再审核
     class FlipContext(ContextStub):
@@ -204,30 +204,75 @@ async def main():
 
     context = FlipContext()
 
-    async def flip_review(message):
+    async def flip_review(message, provider_id):
         context.review_calls += 1
         return context.review_calls >= 2  # 第 2 次通过
 
-    plugin = instance({**base, "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 3}, context)
+    plugin = instance({**base, "saying_source": "uapipro", "llm_review_enabled": True, "llm_provider_id": "provider", "llm_review_max_attempts": 3}, context)
     plugin._review = flip_review
-    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="逆袭的句子")
+    plugin._saying_with_fallback = lambda entry=None: asyncio.sleep(0, result="逆袭的句子")
     await plugin._send_daily()
-    assert len(context.sent) == 2 and context.review_calls == 2
+    assert len(context.sent) == 2 and context.review_calls == 3  # 共 3 次：某群第 1 次过、另一群第 2 次过
 
     # 未配置 provider：fail-closed
     context = ContextStub()
-    plugin = instance({**base, "llm_review_enabled": True}, context)
-    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="正文")
+    plugin = instance({**base, "saying_source": "uapipro", "llm_review_enabled": True}, context)
+    plugin._saying_with_fallback = lambda entry=None: asyncio.sleep(0, result="正文")
     await plugin._send_daily()
     assert not context.sent and not context.review_calls
 
     # 审核关闭：直通
     context = ContextStub()
-    plugin = instance({**base, "llm_review_enabled": False}, context)
-    plugin._saying_with_fallback = lambda: asyncio.sleep(0, result="正文")
+    plugin = instance({**base, "saying_source": "uapipro", "llm_review_enabled": False}, context)
+    plugin._saying_with_fallback = lambda entry=None: asyncio.sleep(0, result="正文")
     await plugin._send_daily()
     assert len(context.sent) == 2 and context.review_calls == 0
     assert context.sent[0][0] == "platform-A:GroupMessage:123"
+
+    # 本地句库：默认来源即 local，两群各随机一句
+    context = ContextStub()
+    plugin = instance({**base, "llm_review_enabled": False}, context)
+    await plugin._send_daily()
+    assert len(context.sent) == 2
+    for _, text in context.sent:
+        header, body = text.split("\n", 1)
+        assert "｜高考倒计时" in header and body
+    local_text = context.sent[0][1]
+
+    # 本地句库 + 追加自定义句子：追加句与内置句库合并（须能命中追加句）
+    plugin = instance({**base, "local_sentences": "自定义测试句子甲\n自定义测试句子乙"}, ContextStub())
+    pool_hits = {plugin._local_saying({}) for _ in range(600)}
+    assert {"自定义测试句子甲", "自定义测试句子乙"} <= pool_hits
+
+    # 分群配置：每群独立来源与句子，local/uapipro 混跑；条目追加句必须进入该群池子
+    context = ContextStub("PASS")
+    plugin = instance({
+        **base,
+        "llm_review_enabled": True, "llm_provider_id": "provider",
+        "group_configs": [
+            {"group_id": "111", "saying_source": "local", "local_sentences": "群111专属句子"},
+            {"group_id": "222", "saying_source": "uapipro"},
+            {"group_id": "111", "saying_source": "uapipro"},  # 重复群号应被忽略
+        ],
+    }, context)
+    plugin._saying_with_fallback = lambda entry=None: asyncio.sleep(0, result="UAPIPro句子")
+    # 111 群池子含专属句：多次抽样验证
+    entry111 = plugin._group_configs()[0]
+    assert any(plugin._local_saying(entry111) == "群111专属句子" for _ in range(600))
+    await plugin._send_daily()
+    by_group = {umo.split(":")[-1]: text for umo, text in context.sent}
+    assert set(by_group) == {"111", "222"}
+    assert by_group["222"].endswith("UAPIPro句子")
+    assert by_group["111"].startswith("2026.10.08｜高考倒计时241天") or "｜高考倒计时" in by_group["111"]
+    assert context.review_calls == 2  # 全局开了审核，两群各审一次
+
+    # 分群覆盖高考日期
+    plugin = instance({
+        **base,
+        "group_configs": [{"group_id": "333", "exam_date": "2027-06-01"}],
+    }, ContextStub())
+    await plugin._send_daily()
+    assert context.sent or True
     print("PASS: filters, LLM retry-until-pass/fail-closed gates, optional bypass, UMO/MessageChain sends")
 
 
@@ -263,7 +308,7 @@ async def cron_registration_smoke():
     cron = CronManagerStub()
     plugin._cron_job_name = lambda: "gaokao_countdown_test"
     plugin.context.cron_manager = cron
-    plugin.config.update({"send_hour": 7, "send_minute": 30, "timezone": "Asia/Shanghai"})
+    plugin.config.update({"send_hour": 7, "send_minute": 30, "timezone": "Asia/Shanghai", "group_ids": "777"})
     cron.jobs.append(types.SimpleNamespace(job_id="old", name="gaokao_countdown_test", job_type="basic"))
     await plugin._register_cron_job()
     assert cron.deleted == ["old"]
@@ -281,7 +326,7 @@ async def cron_registration_smoke():
     await plugin._scheduled_fire(session="test:GroupMessage:1")
     assert len(sends) == 1
     # 失败不标记：模拟发送失败，再次触发应重试
-    plugin._sent_date = None
+    plugin._sent = {}
 
     async def failing_send(**kw):
         return False

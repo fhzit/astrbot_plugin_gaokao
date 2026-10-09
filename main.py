@@ -1,5 +1,7 @@
 import asyncio
+import random
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -7,14 +9,17 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import MessageChain
 from astrbot.api.star import Context, Star, register
 
+# 内置本地句库：随插件分发，用户可在配置里追加自己的句子
+BUILTIN_SENTENCES_PATH = Path(__file__).parent / "sentences.txt"
 
-@register("astrbot_plugin_gaokao", "HelloFHZ", "每日高考倒计时与 UAPIPro 一言", "1.1.0")
+
+@register("astrbot_plugin_gaokao", "HelloFHZ", "每日高考倒计时与励志一言", "1.2.0")
 class GaokaoCountdown(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
         self.task = None
-        self._sent_date = None
+        self._sent = {}  # 群号 -> 当日已发送日期，用于按群去重
 
     async def initialize(self):
         self.task = asyncio.create_task(self._scheduler())
@@ -45,6 +50,51 @@ class GaokaoCountdown(Star):
         # 否则重启后匹配不到旧任务，产生无法触发的孤儿任务
         return "gaokao_countdown_daily"
 
+    def _group_configs(self) -> list[dict]:
+        """解析分群配置，返回有效的群配置列表。
+
+        新版格式：group_configs（template_list，每群一份独立配置）。
+        兼容旧版：group_configs 为空时回落到 group_ids + 全局配置。
+        """
+        raw = self.config.get("group_configs") or []
+        if not isinstance(raw, list):
+            raw = []
+        result = []
+        seen = set()
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            group_id = str(entry.get("group_id", "")).strip()
+            if not group_id or group_id in seen:
+                continue
+            seen.add(group_id)
+            result.append(entry)
+        if result:
+            return result
+        # 旧版兼容：单一全局配置应用到所有群
+        groups = [
+            value.strip()
+            for value in str(self.config.get("group_ids", "")).replace("，", ",").split(",")
+            if value.strip()
+        ]
+        return [{"group_id": g} for g in groups]
+
+    def _group_config(self, entry: dict, key: str, default):
+        """取群配置项：群条目里没填（空）则回落到全局配置。"""
+        value = entry.get(key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return self.config.get(key, default)
+        if isinstance(value, list) and not value:
+            return self.config.get(key, default)
+        # 数值为 0（如按群审核次数未设置）也回落到全局配置
+        if isinstance(value, (int, float)) and value == 0:
+            return self.config.get(key, default)
+        if isinstance(value, dict) and not any(
+            v not in (None, "", [], {}) for v in value.values()
+        ):
+            return self.config.get(key, default)
+        return value
+
     async def _register_cron_job(self):
         """把每日推送注册到 AstrBot 未来任务（CronJobManager，basic 型持久任务）。"""
         cron_expression = self._cron_expression()
@@ -61,11 +111,7 @@ class GaokaoCountdown(Star):
                     await cron_mgr.delete_job(job.job_id)
             payload = {}
             prefix = str(self.config.get("umo_prefix", "")).strip()
-            groups = [
-                g.strip()
-                for g in str(self.config.get("group_ids", "")).replace("，", ",").split(",")
-                if g.strip()
-            ]
+            groups = [e["group_id"] for e in self._group_configs()]
             if prefix and groups:
                 payload["session"] = f"{prefix}:GroupMessage:{groups[0]}"
             job = await cron_mgr.add_basic_job(
@@ -104,11 +150,13 @@ class GaokaoCountdown(Star):
         """
         tz = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
         today = datetime.now(tz).date().isoformat()
-        if self._sent_date == today:
-            logger.info("今日高考倒计时已发送过，跳过本次触发")
+        if self._sent and all(d == today for d in self._sent.values()) and self._sent:
+            logger.info("今日高考倒计时已全部发送过，跳过本次触发")
             return
         if await self._send_daily():
-            self._sent_date = today
+            self._sent.clear()
+            for entry in self._group_configs():
+                self._sent[entry["group_id"]] = today
 
     async def _scheduler(self):
         while True:
@@ -124,18 +172,23 @@ class GaokaoCountdown(Star):
                     target += timedelta(days=1)
                 await asyncio.sleep((target - now).total_seconds())
                 today = datetime.now(tz).date().isoformat()
-                if self._sent_date != today:
+                # 按群去重：_send_daily 内部会跳过当天已发成功的群
+                if not (self._sent and all(d == today for d in self._sent.values())):
                     await self._send_daily()
-                    self._sent_date = today
+                    if self._sent and all(d == today for d in self._sent.values()):
+                        self._sent = dict.fromkeys(
+                            [e["group_id"] for e in self._group_configs()], today
+                        )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 logger.error(f"定时任务配置或执行异常，将在 60 秒后重试：{exc}")
                 await asyncio.sleep(60)
 
-    async def _saying(self):
-        advanced = dict(self.config.get("hitokoto_advanced", {}) or {})
-        token = str(self.config.get("uapi_token", "")).strip()
+    async def _saying(self, entry: dict | None = None):
+        entry = entry or {}
+        advanced = dict(self._group_config(entry, "hitokoto_advanced", {}) or {})
+        token = str(self._group_config(entry, "uapi_token", "")).strip()
         headers = {"User-Agent": "AstrBot_UApiPro"}
         params = {}
         if token:
@@ -186,14 +239,37 @@ class GaokaoCountdown(Star):
                     raise ValueError(f"语料库异常: {api_msg or '无法读取语录数据，请稍后再试'}")
                 raise ValueError(f"接口响应异常 (HTTP {resp.status})" + (f": {api_msg}" if api_msg else ""))
 
-    async def _saying_with_fallback(self):
+    def _local_saying(self, entry: dict) -> str:
+        """从本地句库随机抽一句。内置句库 + 用户在配置里追加的句子合并后抽取。"""
+        builtin = []
+        try:
+            builtin = [
+                line.strip()
+                for line in BUILTIN_SENTENCES_PATH.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        except Exception as exc:
+            logger.warning(f"读取内置本地句库失败：{exc}")
+        extra_raw = str(self._group_config(entry, "local_sentences", ""))
+        extra = [
+            line.strip()
+            for line in extra_raw.splitlines()
+            if line.strip()
+        ]
+        pool = builtin + extra
+        if not pool:
+            raise ValueError("本地句库为空：内置句库缺失且未在配置中添加句子")
+        return random.choice(pool)
+
+    async def _saying_with_fallback(self, entry: dict | None = None):
         """带降级重试的一言获取。
 
         UAPIPro 的多标签是 AND 语义，标签勾太多容易无匹配（HTTP 404）。
         依次尝试：原始筛选 → 去掉标签 → 去掉标签和分类 → 去掉全部筛选，
         保证每天一定能取到语录。
         """
-        advanced = dict(self.config.get("hitokoto_advanced", {}) or {})
+        entry = entry or {}
+        advanced = dict(self._group_config(entry, "hitokoto_advanced", {}) or {})
         attempts = []
         if advanced.get("enabled", False):
             attempts.append(advanced)
@@ -217,12 +293,12 @@ class GaokaoCountdown(Star):
         assert last_error is not None
         raise last_error
 
-    async def _review(self, message: str) -> bool:
+    async def _review(self, message: str, provider_id: str) -> bool:
         """LLM 审核：仅模型明确返回 PASS 视为通过（fail-closed）。
 
         审核标准不只查违规内容，还要求语境契合高考备考与励志主题。
         """
-        provider_id = str(self.config.get("llm_provider_id", "")).strip()
+        provider_id = str(provider_id).strip()
         if not provider_id:
             logger.warning("LLM 审核已启用但未配置模型提供商 ID，按拒绝发布处理")
             return False
@@ -254,59 +330,71 @@ class GaokaoCountdown(Star):
             return False
         return True
 
-    async def _send_daily(self) -> bool:
-        """执行一次完整推送；返回是否有任一群发送成功。"""
-        groups = [
-            value.strip()
-            for value in str(self.config.get("group_ids", "")).replace("，", ",").split(",")
-            if value.strip()
-        ]
-        if not groups:
-            logger.warning("高考倒计时：未配置群聊 ID")
-            return False
-        prefix = str(self.config.get("umo_prefix", "")).strip()
-        if not prefix:
-            logger.error("必须填写实际 AstrBot 平台实例 ID（umo_prefix），已停止发送")
-            return False
-        tz = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
-        today = datetime.now(tz).date()
+    def _build_message(self, entry: dict, today, days: int, saying: str) -> str:
+        """按群配置构造消息：标题格式和高考日期支持按群覆盖。"""
+        header_format = str(
+            self._group_config(entry, "message_format", "{date}｜高考倒计时{days}天")
+        )
         exam_date = datetime.strptime(
+            str(self._group_config(entry, "exam_date", "2027-06-07")), "%Y-%m-%d"
+        ).date()
+        group_days = days if exam_date == self._global_exam_date(today) else (
+            exam_date - today).days - 1
+        return (
+            header_format.replace("{date}", f"{today:%Y.%m.%d}")
+            .replace("{days}", str(max(group_days, 0)))
+            + "\n"
+            + saying
+        )
+
+    def _global_exam_date(self, today):
+        return datetime.strptime(
             str(self.config.get("exam_date", "2027-06-07")), "%Y-%m-%d"
         ).date()
-        # 倒计时口径：今天与高考日当天都不计入，即「完整剩余天数」
-        # 2026-10-08 → 2027-06-07 显示 241，次日 240
-        days = (exam_date - today).days - 1
-        if bool(self.config.get("llm_review_enabled", False)):
+
+    async def _saying_for_group(self, entry: dict) -> str:
+        """按群的来源配置取一句：local 本地句库，uapipro 走 API。"""
+        source = str(self._group_config(entry, "saying_source", "local")).strip().lower()
+        if source == "uapipro":
+            return await self._saying_with_fallback(entry)
+        return self._local_saying(entry)
+
+    async def _send_one_group(self, entry: dict, prefix: str, today, days: int) -> bool:
+        """向单个群执行完整推送（独立取一言、独立审核）；返回是否发送成功。"""
+        group_id = entry["group_id"]
+        if bool(self._group_config(entry, "llm_review_enabled", False)):
             try:
-                max_attempts = int(self.config.get("llm_review_max_attempts", 3))
+                max_attempts = int(
+                    self._group_config(entry, "llm_review_max_attempts", 3)
+                )
             except (TypeError, ValueError):
                 max_attempts = 3
             max_attempts = max(1, min(max_attempts, 10))
-            provider_id = str(self.config.get("llm_provider_id", "")).strip()
+            provider_id = str(self._group_config(entry, "llm_provider_id", "")).strip()
             if not provider_id:
-                logger.warning("LLM 审核已启用但未配置模型提供商 ID，按拒绝发布处理")
+                logger.warning(f"群 {group_id}：LLM 审核已启用但未配置模型提供商 ID，按拒绝发布处理")
                 return False
             message = None
             for attempt in range(1, max_attempts + 1):
                 try:
-                    saying = await self._saying_with_fallback()
-                    candidate = f"{today:%Y.%m.%d}｜高考倒计时{days}天\n{saying}"
+                    saying = await self._saying_for_group(entry)
+                    candidate = self._build_message(entry, today, days, saying)
                 except Exception as exc:
-                    logger.error(f"获取一言或构造消息失败：{exc}")
+                    logger.error(f"群 {group_id}：获取一言或构造消息失败：{exc}")
                     return False
                 try:
-                    passed = await self._review(candidate)
+                    passed = await self._review(candidate, provider_id)
                 except Exception as exc:
                     # 常见于模型 API 限流（429）：等待后重试而不是直接放弃
                     if attempt < max_attempts:
                         wait = attempt
                         logger.warning(
-                            f"LLM 审核调用失败（{exc}），等待 {wait} 秒后重试"
+                            f"群 {group_id}：LLM 审核调用失败（{exc}），等待 {wait} 秒后重试"
                             f"（{attempt}/{max_attempts}）"
                         )
                         await asyncio.sleep(wait)
                         continue
-                    logger.error(f"LLM 审核调用失败，已达重试上限，按拒绝发布处理：{exc}")
+                    logger.error(f"群 {group_id}：LLM 审核调用失败，已达重试上限，按拒绝发布处理：{exc}")
                     return False
                 if passed:
                     message = candidate
@@ -314,36 +402,61 @@ class GaokaoCountdown(Star):
                 if attempt < max_attempts:
                     wait = attempt
                     logger.info(
-                        f"LLM 审核未通过（第 {attempt}/{max_attempts} 次），"
+                        f"群 {group_id}：LLM 审核未通过（第 {attempt}/{max_attempts} 次），"
                         f"等待 {wait} 秒后重新获取一言再审"
                     )
                     await asyncio.sleep(wait)
             if message is None:
-                logger.error(f"连续 {max_attempts} 次审核未通过，本次放弃发布")
+                logger.error(f"群 {group_id}：连续 {max_attempts} 次审核未通过，本次放弃发布")
                 return False
         else:
             try:
-                saying = await self._saying_with_fallback()
-                message = f"{today:%Y.%m.%d}｜高考倒计时{days}天\n{saying}"
+                saying = await self._saying_for_group(entry)
+                message = self._build_message(entry, today, days, saying)
             except Exception as exc:
-                logger.error(f"获取一言或构造消息失败：{exc}")
+                logger.error(f"群 {group_id}：获取一言或构造消息失败：{exc}")
                 return False
         try:
             from astrbot.core.platform.message_session import MessageSession
-            parsed = MessageSession.from_str(f"{prefix}:GroupMessage:{groups[0]}")
+            parsed = MessageSession.from_str(f"{prefix}:GroupMessage:{group_id}")
             platform_id = parsed.platform_name
         except Exception as exc:
-            logger.error(f"群聊会话 UMO 配置格式错误：{exc}")
+            logger.error(f"群 {group_id}：会话 UMO 配置格式错误：{exc}")
             return False
+        try:
+            umo = f"{platform_id}:GroupMessage:{group_id}"
+            sent = await self.context.send_message(umo, MessageChain().message(message))
+            if sent is False:
+                logger.error(f"向群 {group_id} 发送失败：没有找到匹配的平台实例")
+                return False
+            return True
+        except Exception as exc:
+            logger.error(f"向群 {group_id} 推送失败：{exc}")
+            return False
+
+    async def _send_daily(self) -> bool:
+        """执行一次完整推送；每个群独立配置、独立取一言。返回是否有任一群发送成功。"""
+        entries = self._group_configs()
+        if not entries:
+            logger.warning("高考倒计时：未配置任何群聊")
+            return False
+        prefix = str(self.config.get("umo_prefix", "")).strip()
+        if not prefix:
+            logger.error("必须填写实际 AstrBot 平台实例 ID（umo_prefix），已停止发送")
+            return False
+        tz = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
+        today = datetime.now(tz).date()
+        exam_date = self._global_exam_date(today)
+        # 倒计时口径：今天与高考日当天都不计入，即「完整剩余天数」
+        # 2026-10-08 → 2027-06-07 显示 241，次日 240
+        days = (exam_date - today).days - 1
         any_sent = False
-        for group in groups:
-            try:
-                umo = f"{platform_id}:GroupMessage:{group}"
-                sent = await self.context.send_message(umo, MessageChain().message(message))
-                if sent is False:
-                    logger.error(f"向群 {group} 发送失败：没有找到匹配的平台实例")
-                else:
-                    any_sent = True
-            except Exception as exc:
-                logger.error(f"向群 {group} 推送失败：{exc}")
+        for entry in entries:
+            group_id = entry["group_id"]
+            if self._sent.get(group_id) == today.isoformat():
+                logger.info(f"群 {group_id}：今日高考倒计时已发送过，跳过")
+                continue
+            if await self._send_one_group(entry, prefix, today, days):
+                any_sent = True
+                self._sent[group_id] = today.isoformat()
         return any_sent

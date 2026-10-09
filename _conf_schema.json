@@ -1,5 +1,114 @@
 {
-  "group_ids": {"description": "目标群号，多个群号用英文逗号分隔", "type": "string", "default": ""},
+  "group_configs": {
+    "description": "分群推送配置",
+    "hint": "点击「添加条目」为每个群单独添加一份配置：群号必填，其余项留空则使用下方全局默认值。配置了分群后，旧的「目标群号」配置将被忽略。",
+    "type": "template_list",
+    "templates": {
+      "group": {
+        "name": "群聊配置",
+        "hint": "一个群一份独立配置",
+        "display_item": "group_id",
+        "items": {
+          "group_id": {
+            "description": "群号",
+            "hint": "该配置生效的 QQ 群号，必填",
+            "type": "string",
+            "default": ""
+          },
+          "saying_source": {
+            "description": "一言来源",
+            "hint": "local=本地句库随机抽取；uapipro=调用 UAPIPro 接口。留空使用全局设置。",
+            "type": "string",
+            "options": ["local", "uapipro"],
+            "labels": ["本地句库（内置156句，可自行追加）", "UAPIPro 接口"],
+            "default": ""
+          },
+          "local_sentences": {
+            "description": "自定义句子追加（仅本地句库生效）",
+            "hint": "一行一句，会与内置句库合并后随机抽取。仅一言来源为本地句库时使用。",
+            "type": "text",
+            "default": ""
+          },
+          "exam_date": {
+            "description": "高考日期",
+            "hint": "格式 YYYY-MM-DD，留空使用全局设置。适合不同省份/届别单独设置。",
+            "type": "string",
+            "default": ""
+          },
+          "uapi_token": {
+            "description": "UAPIPro Token（仅 UAPIPro 来源生效）",
+            "hint": "留空使用全局设置。",
+            "type": "string",
+            "secret": true,
+            "default": ""
+          },
+          "hitokoto_advanced": {
+            "description": "高级一言设置（仅 UAPIPro 来源生效）",
+            "hint": "留空则全部使用全局设置。",
+            "type": "object",
+            "items": {
+              "enabled": {"description": "启用高级一言", "type": "bool", "default": false},
+              "mode": {
+                "description": "运行模式",
+                "type": "string",
+                "options": ["random", "daily", "recommend", "moment"],
+                "labels": ["随机一言", "每日一言", "场景推荐", "此刻"],
+                "default": "random"
+              },
+              "scene": {
+                "description": "推荐场景（仅场景推荐模式）",
+                "type": "string",
+                "options": ["dawn", "morning", "noon", "afternoon", "evening", "night", "deep-night", "work", "coding", "meeting", "relax", "emo", "philosophy"],
+                "labels": ["破晓", "清晨", "午间", "午后", "傍晚", "夜晚", "深夜", "工作", "编程", "会议", "放松", "情绪", "哲思"],
+                "default": "morning"
+              },
+              "source": {"description": "语料来源过滤", "type": "list", "options": ["caoxingyu sentence", "english historical quotes", "quotable", "sentences bundle"], "labels": ["曹星宇句子集（中文）", "英文历史名言", "Quotable 名言库", "综合句子语料库（中文为主）"], "default": []},
+              "category": {"description": "分类过滤", "type": "list", "options": ["诗词", "古诗文", "文学", "哲学", "影视", "动画", "漫画", "游戏", "网络", "网易云", "抖机灵", "原创", "其他"], "default": []},
+              "tag": {"description": "标签过滤", "type": "list", "options": ["emo", "上午", "下午", "人生", "会议", "傍晚", "励志", "午间", "历史", "友情", "哲学", "坚定", "夜晚", "工作", "希望", "幽默", "怀旧", "成长", "技术", "放松", "时间", "死亡", "治愈", "浪漫", "深夜", "清晨", "清醒", "温柔", "热血", "爱情", "独处", "现实", "理想", "相思", "真理", "禅意", "离别", "自由", "轻松", "释然", "锋利"], "default": []}
+            }
+          },
+          "llm_review_enabled": {
+            "description": "启用发布前 LLM 审核（该群独立）",
+            "hint": "留空使用全局设置。",
+            "type": "bool",
+            "default": false
+          },
+          "llm_review_max_attempts": {
+            "description": "审核重试次数上限",
+            "hint": "1-10，留空使用全局设置。",
+            "type": "int",
+            "default": 0
+          },
+          "llm_provider_id": {
+            "description": "审核使用的模型提供商 ID",
+            "hint": "留空使用全局设置。",
+            "type": "string",
+            "default": ""
+          }
+        }
+      }
+    }
+  },
+  "group_ids": {
+    "description": "目标群号（旧版兼容）",
+    "hint": "仅在「分群推送配置」为空时生效：多个群号用英文逗号分隔，所有群共用下方全局配置。",
+    "type": "string",
+    "default": ""
+  },
+  "saying_source": {
+    "description": "全局一言来源",
+    "hint": "local=本地句库随机抽取（默认）；uapipro=调用 UAPIPro 接口。分群配置里可按群覆盖。",
+    "type": "string",
+    "options": ["local", "uapipro"],
+    "labels": ["本地句库（内置156句，可自行追加）", "UAPIPro 接口"],
+    "default": "local"
+  },
+  "local_sentences": {
+    "description": "自定义句子追加（本地句库）",
+    "hint": "一行一句，与内置句库合并后随机抽取；仅一言来源为本地句库时生效。",
+    "type": "text",
+    "default": ""
+  },
   "exam_date": {"description": "高考日期，格式 YYYY-MM-DD", "type": "string", "default": "2027-06-07"},
   "send_hour": {"description": "每日发送小时（0-23）", "type": "int", "default": 7},
   "send_minute": {"description": "每日发送分钟（0-59）", "type": "int", "default": 0},
@@ -8,14 +117,14 @@
   "uapi_token": {
     "description": "UAPIPro API Token",
     "type": "string",
-    "hint": "可选。请前往 uapis.cn 获取您的 API Token，留空则匿名调用。",
+    "hint": "可选。请前往 uapis.cn 获取您的 API Token，留空则匿名调用。仅一言来源为 UAPIPro 时生效。",
     "type_note": "string",
     "secret": true,
     "default": ""
   },
   "hitokoto_advanced": {
-    "description": "高级一言设置",
-    "hint": "配置每日推送使用的高级一言模式（场景推荐/每日一言/此刻）与来源、分类、标签过滤。",
+    "description": "高级一言设置（UAPIPro）",
+    "hint": "仅一言来源为 UAPIPro 时生效：配置高级一言模式（场景推荐/每日一言/此刻）与来源、分类、标签过滤。",
     "type": "object",
     "items": {
       "enabled": {
