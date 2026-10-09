@@ -20,6 +20,7 @@ class GaokaoCountdown(Star):
         self.config = config
         self.task = None
         self._sent = {}  # 群号 -> 当日已发送日期，用于按群去重
+        self._send_lock = asyncio.Lock()  # 串行化推送：未来任务与内置调度器可能同一秒触发
 
     async def initialize(self):
         self.task = asyncio.create_task(self._scheduler())
@@ -435,7 +436,15 @@ class GaokaoCountdown(Star):
             return False
 
     async def _send_daily(self) -> bool:
-        """执行一次完整推送；每个群独立配置、独立取一言。返回是否有任一群发送成功。"""
+        """执行一次完整推送；每个群独立配置、独立取一言。返回是否有任一群发送成功。
+
+        加锁串行化：未来任务（07:00:00 cron）与内置调度器（07:00 定时 sleep）
+        可能在同一秒各自触发一次，无锁时会并发通过去重检查导致重复推送。
+        """
+        async with self._send_lock:
+            return await self._send_daily_locked()
+
+    async def _send_daily_locked(self) -> bool:
         entries = self._group_configs()
         if not entries:
             logger.warning("高考倒计时：未配置任何群聊")

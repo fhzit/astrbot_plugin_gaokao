@@ -339,6 +339,12 @@ async def cron_registration_smoke():
     plugin2.context.cron_manager = None
     await plugin2._register_cron_job()  # 优雅降级，不抛异常
 
+    # 并发触发去重：未来任务与内置调度器同一秒触发只能发一次
+    ctx3 = ContextStub()
+    plugin3 = instance({"group_ids": "777", "umo_prefix": "p"}, ctx3)
+    await asyncio.gather(plugin3._send_daily(), plugin3._send_daily())
+    assert len(ctx3.sent) == 1
+
     await plugin._unregister_cron_job()
     assert cron.jobs == []
     print("PASS: cron job register / fire dedupe / degrade / unregister")
